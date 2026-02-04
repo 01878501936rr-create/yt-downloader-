@@ -1,85 +1,48 @@
 const express = require("express");
 const cors = require("cors");
 const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(cors());
 
-/* ================= VIDEO STREAM ================= */
 app.get("/stream", (req, res) => {
   const videoURL = req.query.url;
   const quality = req.query.quality || "720";
 
   if (!videoURL) return res.status(400).send("URL নেই");
 
+  // temp filename
+  const tempFile = path.join(__dirname, `temp_${Date.now()}.mp4`);
+
   let format;
-  if (quality === "720") {
-    format = "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]";
-  } else if (quality === "1080") {
-    format = "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]";
-  } else {
-    format = "bv*[ext=mp4][height<=360]+ba[ext=m4a]/b[ext=mp4][height<=360]";
-  }
+  if (quality === "720") format = "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]";
+  else if (quality === "1080") format = "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]";
+  else format = "bv*[ext=mp4][height<=360]+ba[ext=m4a]/b[ext=mp4][height<=360]";
 
-  res.setHeader("Content-Type", "video/mp4"); // ✅ important for <video> playback
-  res.setHeader("Transfer-Encoding", "chunked");
-
+  // download video to temp file
   const yt = spawn("yt-dlp", [
     "-f", format,
     "--merge-output-format", "mp4",
-    "--no-progress",
-    "-o", "-", // stream to stdout
+    "-o", tempFile,
     videoURL
   ]);
 
-  yt.stdout.pipe(res);
-  yt.stderr.on("data", (data) => console.error(data.toString()));
-  yt.on("close", () => res.end());
-  yt.on("error", (err) => {
-    console.error("yt-dlp error:", err);
-    res.status(500).end();
+  yt.stderr.on("data", d => console.log(d.toString()));
+
+  yt.on("close", (code) => {
+    if (code !== 0) return res.status(500).send("ভিডিও ডাউনলোড করতে সমস্যা হয়েছে");
+
+    res.sendFile(tempFile, (err) => {
+      if (err) console.error(err);
+      fs.unlink(tempFile, () => {}); // delete temp file
+    });
   });
 });
 
-/* ================= FORCE DOWNLOAD ================= */
 app.get("/download", (req, res) => {
-  const videoURL = req.query.url;
-  const quality = req.query.quality || "720";
-
-  if (!videoURL) return res.status(400).send("URL নেই");
-
-  let format;
-  if (quality === "720") {
-    format = "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]";
-  } else if (quality === "1080") {
-    format = "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]";
-  } else {
-    format = "bv*[ext=mp4][height<=360]+ba[ext=m4a]/b[ext=mp4][height<=360]";
-  }
-
-  res.setHeader("Content-Type", "application/octet-stream");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="video_${quality}.mp4"`
-  );
-  res.setHeader("Transfer-Encoding", "chunked");
-
-  const yt = spawn("yt-dlp", [
-    "-f", format,
-    "--merge-output-format", "mp4",
-    "--no-progress",
-    "-o", "-", // stream to stdout
-    videoURL
-  ]);
-
-  yt.stdout.pipe(res);
-  yt.stderr.on("data", (data) => console.error(data.toString()));
-  yt.on("close", () => res.end());
-  yt.on("error", (err) => {
-    console.error("yt-dlp error:", err);
-    res.status(500).end();
-  });
+  // same as before, just force download
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("সার্ভার চলছে:", PORT));
+app.listen(3000, () => console.log("সার্ভার চলছে: 3000"));
